@@ -211,6 +211,12 @@ class AwsIotMqttClient implements Closeable {
     }
 
     void reconnect() throws TimeoutException, ExecutionException, InterruptedException {
+        synchronized (this) {
+            // Skip reconnection if there is an ongoing connection attempt
+            if (connectionFuture != null && !connectionFuture.isDone()) {
+                return;
+            }
+        }
         logger.atInfo().log("Reconnecting MQTT client most likely due to device configuration change");
         disconnect().get(getTimeout(), TimeUnit.MILLISECONDS);
         connect().get(getTimeout(), TimeUnit.MILLISECONDS);
