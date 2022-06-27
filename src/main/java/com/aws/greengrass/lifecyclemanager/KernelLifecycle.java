@@ -462,11 +462,12 @@ public class KernelLifecycle {
      */
     public void softShutdown(int timeoutSeconds) {
         logger.atDebug("system-shutdown").log("Start soft shutdown");
+        stopAllServices(timeoutSeconds);
         kernel.getContext().waitForPublishQueueToClear();
+        logger.atDebug("system-shutdown").log("Closing transaction log");
         close(tlog);
         // Update effective config with our last known state
         kernel.writeEffectiveConfig();
-        stopAllServices(timeoutSeconds);
     }
 
     public void shutdown() {

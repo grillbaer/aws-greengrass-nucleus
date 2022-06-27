@@ -53,6 +53,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -86,6 +87,7 @@ import static com.aws.greengrass.deployment.model.DeploymentResult.DeploymentSta
 public class DeploymentService extends GreengrassService {
 
     public static final String DEPLOYMENT_SERVICE_TOPICS = "DeploymentService";
+    public static final String DEPLOYMENT_QUEUE_TOPIC = "DeploymentQueue";
     public static final String GROUP_TO_ROOT_COMPONENTS_TOPICS = "GroupToRootComponents";
     public static final String GROUP_MEMBERSHIP_TOPICS = "GroupMembership";
     public static final String COMPONENTS_TO_GROUPS_TOPICS = "ComponentToGroups";
@@ -188,6 +190,7 @@ public class DeploymentService extends GreengrassService {
         // Reset shutdown signal since we're trying to startup here
         this.receivedShutdown.set(false);
         reportState(State.RUNNING);
+        loadDeploymentQueueFromConfig(); // Load any deployments from queue during previous shutdown
 
         while (!receivedShutdown.get()) {
             if (currentDeploymentTaskMetadata != null && currentDeploymentTaskMetadata.getDeploymentResultFuture()
@@ -272,7 +275,55 @@ public class DeploymentService extends GreengrassService {
 
     @Override
     protected void shutdown() {
+        saveDeploymentQueueToConfig(); // Save any deployments in queue for next startup
         receivedShutdown.set(true);
+    }
+
+    private void saveDeploymentQueueToConfig() {
+        try {
+            final List<String> deploymentsToSave = new ArrayList<>();
+            if (this.currentDeploymentTaskMetadata != null) {
+                deploymentsToSave.add(SerializerFactory.getFailSafeJsonObjectMapper().writeValueAsString(
+                        this.currentDeploymentTaskMetadata.getDeployment()));
+            }
+            Deployment deployment = deploymentQueue.peek();
+            while (deployment != null) {
+                deploymentsToSave.add(SerializerFactory.getFailSafeJsonObjectMapper().writeValueAsString(deployment));
+                deploymentQueue.remove();
+                deployment = deploymentQueue.peek();
+            }
+            if (deploymentsToSave.isEmpty()) {
+                return;
+            }
+            logger.atInfo().kv(DEPLOYMENT_QUEUE_TOPIC, deploymentsToSave).log("Saving queued deployments");
+            this.config.lookup(DEPLOYMENT_QUEUE_TOPIC).withValue(deploymentsToSave);
+        } catch (Exception e) {
+            logger.atError().cause(e).log("Failed to save deployment queue");
+        }
+    }
+
+    private void loadDeploymentQueueFromConfig() {
+        try {
+            final Topic deploymentQueueTopic = this.config.lookup(DEPLOYMENT_QUEUE_TOPIC);
+            final List<String> savedDeployments = (List<String>) deploymentQueueTopic.getOnce();
+            if (savedDeployments == null || savedDeployments.isEmpty()) {
+                return;
+            }
+            logger.atInfo().kv(DEPLOYMENT_QUEUE_TOPIC, savedDeployments).log("Loading queued deployments");
+            savedDeployments.forEach(deploymentString -> {
+                try {
+                    final Deployment deployment =
+                            SerializerFactory.getFailSafeJsonObjectMapper().readValue(deploymentString, Deployment.class);
+                    if (deployment != null) {
+                        this.deploymentQueue.offer(deployment);
+                    }
+                } catch (JsonProcessingException e) {
+                    logger.atError().cause(e).log("Failed to parse saved deployment queue element");
+                }
+            });
+        } catch (Exception e) {
+            logger.atError().cause(e).log("Failed to load deployment queue");
+        }
     }
 
     @SuppressWarnings("PMD.NullAssignment")
@@ -500,8 +551,7 @@ public class DeploymentService extends GreengrassService {
         logger.atInfo().kv("deployment", deployment.getId()).log("Started deployment execution");
 
         currentDeploymentTaskMetadata =
-                new DeploymentTaskMetadata(deploymentTask, process, deployment.getId(), deployment.getDeploymentType(),
-                                           new AtomicInteger(1), deployment.getDeploymentDocumentObj(), cancellable);
+                new DeploymentTaskMetadata(deployment, deploymentTask, process, new AtomicInteger(1), cancellable);
     }
 
     private void updateDeploymentResultAsFailed(Deployment deployment, DeploymentTask deploymentTask,
@@ -514,9 +564,8 @@ public class DeploymentService extends GreengrassService {
         } else {
             process = CompletableFuture.completedFuture(result);
         }
-        currentDeploymentTaskMetadata = new DeploymentTaskMetadata(deploymentTask, process, deployment.getId(),
-                deployment.getDeploymentType(), new AtomicInteger(1),
-                deployment.getDeploymentDocumentObj(), false);
+        currentDeploymentTaskMetadata = new DeploymentTaskMetadata(deployment, deploymentTask, process,
+                new AtomicInteger(1), false);
     }
 
     @SuppressWarnings("PMD.ExceptionAsFlowControl")

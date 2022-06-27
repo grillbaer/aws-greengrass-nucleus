@@ -5,11 +5,11 @@
 
 package com.aws.greengrass.deployment.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.NonNull;
 import lombok.Setter;
 import lombok.ToString;
 
@@ -22,7 +22,6 @@ import lombok.ToString;
 public class Deployment {
     @Setter
     private DeploymentDocument deploymentDocumentObj;
-    @JsonIgnore
     private String deploymentDocument;
     @EqualsAndHashCode.Include
     private DeploymentType deploymentType;
