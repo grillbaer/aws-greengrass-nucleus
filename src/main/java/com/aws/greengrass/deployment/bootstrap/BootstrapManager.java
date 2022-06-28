@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -77,12 +78,14 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
     private static final String RESTART_REQUIRED_MESSAGE = "Restart required due to configuration change";
 
     private static final Logger logger = LogManager.getLogger(BootstrapManager.class);
+    private static final Random rand = new Random();
     @Setter(AccessLevel.PACKAGE)
     @Getter(AccessLevel.PACKAGE)
     private List<BootstrapTaskStatus> bootstrapTaskStatusList = new ArrayList<>();
     private final Kernel kernel;
     private final Platform platform;
     private int cursor;
+    private final int uuid;
 
     /**
      * Constructor for BootstrapManager to process bootstrap tasks from deployments.
@@ -98,6 +101,7 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
         this.kernel = kernel;
         this.cursor = 0;
         this.platform = platform;
+        this.uuid = rand.nextInt(1000);
     }
 
     /**
@@ -112,6 +116,7 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
     @SuppressWarnings("PMD.PrematureDeclaration")
     public boolean isBootstrapRequired(Map<String, Object> newConfig)
             throws ServiceUpdateException, ComponentConfigurationValidationException {
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: isBootstrapRequired() begin");
         bootstrapTaskStatusList.clear();
         cursor = 0;
 
@@ -147,7 +152,7 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
         }
         logger.atInfo().kv("list", dependencyFound).log("Found a list of bootstrap tasks in dependency order");
         dependencyFound.forEach(name -> bootstrapTaskStatusList.add(new BootstrapTaskStatus(name)));
-
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: isBootstrapRequired() end");
         return nucleusConfigValidAndNeedsRestart || !bootstrapTaskStatusList.isEmpty();
     }
 
@@ -359,6 +364,7 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
     public void persistBootstrapTaskList(Path persistedTaskFilePath) throws IOException {
         Objects.requireNonNull(persistedTaskFilePath);
         logger.atInfo().kv("filePath", persistedTaskFilePath).log("Saving bootstrap task list to file");
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: updating bootstrap list");
         Files.deleteIfExists(persistedTaskFilePath);
         Files.createFile(persistedTaskFilePath);
 
@@ -378,13 +384,14 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
     @SuppressWarnings("PMD.PreserveStackTrace")
     public void loadBootstrapTaskList(Path persistedTaskFilePath) throws IOException {
         Objects.requireNonNull(persistedTaskFilePath);
-
+        logger.atInfo().kv("path", persistedTaskFilePath).kv("uuid", uuid).log("junfu: load bootstrap file path");
         CommitableReader.of(persistedTaskFilePath).read(in -> {
             bootstrapTaskStatusList.clear();
             bootstrapTaskStatusList.addAll(SerializerFactory.getFailSafeJsonObjectMapper()
                     .readValue(in, new TypeReference<List<BootstrapTaskStatus>>(){}));
             return null;
         });
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: load bootstrap list");
     }
 
     /**
@@ -398,6 +405,7 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
         try {
             int exitCode = kernel.locate(next.getComponentName()).bootstrap();
             next.setStatus(DONE);
+            logger.atInfo().kv("name", next.getComponentName()).kv("uuid", uuid).log("junfu: component bootstrap step finished");
             next.setExitCode(exitCode);
             return exitCode;
         } catch (InterruptedException | TimeoutException | ServiceLoadException e) {
@@ -417,6 +425,8 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
     public int executeAllBootstrapTasksSequentially(Path persistedTaskFilePath)
             throws ServiceUpdateException, IOException {
         Objects.requireNonNull(persistedTaskFilePath);
+        logger.atInfo().kv("path", persistedTaskFilePath).kv("uuid", uuid).log("junfu: execute bootstrap file path");
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: execute bootstrap list");
         int exitCode;
         while (hasNext()) {
             BootstrapTaskStatus next = next();
@@ -444,13 +454,17 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
 
     @Override
     public boolean hasNext() {
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: hasNext() begin");
         while (cursor < bootstrapTaskStatusList.size()) {
             BootstrapTaskStatus next = bootstrapTaskStatusList.get(cursor);
             if (!DONE.equals(next.getStatus()) || BootstrapSuccessCode.isErrorCode(next.getExitCode())) {
+                logger.atDebug().kv("next", next).kv("uuid", uuid).log("junfu: next is here");
+                logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: hasNext() end2");
                 return true;
             }
             cursor++;
         }
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: hasNext() end");
         return false;
     }
 
@@ -460,6 +474,7 @@ public class BootstrapManager implements Iterator<BootstrapTaskStatus>  {
             throw new NoSuchElementException();
         }
         cursor++;
+        logger.atInfo().kv("list", bootstrapTaskStatusList).kv("uuid", uuid).log("junfu: next() ");
         return bootstrapTaskStatusList.get(cursor - 1);
     }
 }

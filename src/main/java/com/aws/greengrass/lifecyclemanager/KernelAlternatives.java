@@ -254,16 +254,20 @@ public class KernelAlternatives {
         if (getOldDir().toFile().exists()) {
             try {
                 Path persistedBootstrapTasks = deploymentDirectoryManager.getBootstrapTaskFilePath();
+                logger.atInfo().kv("path", persistedBootstrapTasks).log("junfu: determine bootstrap file path");
                 if (!persistedBootstrapTasks.toFile().exists()) {
+                    logger.atInfo().log("junfu: kernel activate 1");
                     return KERNEL_ACTIVATION;
                 }
                 bootstrapManager.loadBootstrapTaskList(persistedBootstrapTasks);
                 if (bootstrapManager.hasNext()) {
+                    logger.atInfo().log("junfu: kernel bootstrap 1");
                     return BOOTSTRAP;
                 }
             } catch (IOException e) {
                 logger.atError().setCause(e).log("Bootstrap task list not found or unable to read the file");
             }
+            logger.atInfo().log("junfu: kernel activate 2");
             return KERNEL_ACTIVATION;
         } else if (getBrokenDir().toFile().exists()) {
             return KERNEL_ROLLBACK;
